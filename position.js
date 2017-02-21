@@ -1,6 +1,8 @@
 "use strict";
 
-var MATE_VALUE = 10000;	// 最高分值
+var MATE_VALUE = 10000;				// 最高分值
+var WIN_VALUE = MATE_VALUE - 200;	// 赢棋分值（高于此分值都是赢棋）
+var ADVANCED_VALUE = 3;				// 先行权分值
 
 // 棋子编号
 var PIECE_KING = 0;		// 将
@@ -17,8 +19,8 @@ var RANK_BOTTOM = 12;
 var FILE_LEFT = 3;
 var FILE_RIGHT = 11;
 
-var ADD_PIECE = false;	// 添加棋子
-var DEL_PIECE = true;	// 删除棋子
+var ADD_PIECE = false;
+var DEL_PIECE = true;
 
 // 辅助数组，用于判断棋子是否在棋盘上
 var IN_BOARD_ = [
@@ -268,7 +270,7 @@ function IN_BOARD(sq) {
   return IN_BOARD_[sq] != 0;
 }
 
-// 判断某位置是否在九宫格
+// 判断某位置是否在九宫
 function IN_FORT(sq) {
   return IN_FORT_[sq] != 0;
 }
@@ -418,7 +420,7 @@ Position.prototype.clearBoard = function() {
 Position.prototype.setIrrev = function() {
   this.mvList = [0];	// 存放每步走法的数组
   this.pcList = [0];	// 存放每步被吃的棋子。如果没有棋子被吃，存放的是0
-  this.distance = 0;	// 步数
+  this.distance = 0;	// 搜索的深度
 }
 
 // 将FEN串转为一维数组，初始化棋局
@@ -766,6 +768,11 @@ Position.prototype.isMate = function() {
   return true;
 }
 
+//　结合搜索深度的输棋分值
+Position.prototype.mateValue = function() {
+  return this.distance - MATE_VALUE;
+}
+
 // 切换走棋方
 Position.prototype.changeSide = function() {
   this.sdPlayer = 1 - this.sdPlayer;
@@ -773,40 +780,40 @@ Position.prototype.changeSide = function() {
 
 // 走一步棋
 Position.prototype.makeMove = function(mv) {
-  this.movePiece(mv);		// 移动棋子
+  this.movePiece(mv);	// 移动棋子
   
   // 检查走棋是否被将军。如果是，说明这是在送死，撤销走棋并返回false。
   if (this.checked()) {	
-    this.undoMovePiece(mv);	// 撤销棋子移动
+    this.undoMovePiece(mv);
     return false;
   }
 
-  this.changeSide();		// 切换走棋方
-  this.distance ++;			// 棋局深度+1
+  this.changeSide();	// 切换走棋方
+  this.distance ++;		// 搜索深度+1
   return true;
 }
 
 // 取消上一步的走棋
 Position.prototype.undoMakeMove = function() {
-  this.distance --;	// 棋局深度减1
+  this.distance --;		// 搜索深度减1
   this.changeSide();	// 切换走棋方
   this.undoMovePiece();	// 取消上一步的走棋
 }
 
 // 根据走法移动棋子，删除终点位置的棋子，将起点位置的棋子放置在终点的位置。
 Position.prototype.movePiece = function(mv) {
-  var sqSrc = SRC(mv);			// 起点位置
-  var sqDst = DST(mv);			// 终点位置
-  var pc = this.squares[sqDst];	// 终点位置的棋子
-  this.pcList.push(pc);			// 将终点位置的棋子，存入吃子列表
+  var sqSrc = SRC(mv);
+  var sqDst = DST(mv);
+  var pc = this.squares[sqDst];
+  this.pcList.push(pc);
   if (pc > 0) {
-    // 终点有棋子，则要删除该棋子
+    // 终点有棋子，需要删除该棋子
     this.addPiece(sqDst, pc, DEL_PIECE);
   }
   pc = this.squares[sqSrc];
   this.addPiece(sqSrc, pc, DEL_PIECE);	// 删除起点棋子
   this.addPiece(sqDst, pc, ADD_PIECE);	// 将原来起点的棋子添加到终点
-  this.mvList.push(mv);					// 将走法存入走法列表
+  this.mvList.push(mv);
 }
 
 // 取消上一步对棋子的移动
@@ -827,7 +834,10 @@ Position.prototype.undoMovePiece = function() {
 // 如果bDel为false，则将棋子pc添加进棋局中的sp位置；如果bDel为true，则删除sp位置的棋子。
 Position.prototype.addPiece = function(sq, pc, bDel) {
   var pcAdjust;
+  // 添加或删除棋子
   this.squares[sq] = bDel ? 0 : pc;
+  
+  // 更新红黑双方子粒分值
   if (pc < 16) {
     pcAdjust = pc - 8;
     this.vlWhite += bDel ? -PIECE_VALUE[pcAdjust][sq] :
@@ -839,8 +849,14 @@ Position.prototype.addPiece = function(sq, pc, bDel) {
   }
 }
 
-// 局面评估函数，返回红方优势
+// 局面评估函数，返回当前走棋方的优势
 Position.prototype.evaluate = function() {
-  var vl = this.vlWhite - this.vlBlack;
+  var vl = (this.sdPlayer == 0 ? this.vlWhite - this.vlBlack :
+      this.vlBlack - this.vlWhite) + ADVANCED_VALUE;
   return vl;
+}
+
+// 获取历史表的指标
+Position.prototype.historyIndex = function(mv) {
+  return ((this.squares[SRC(mv)] - 8) << 8) + DST(mv);
 }

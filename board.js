@@ -1,10 +1,10 @@
 "use strict";
 
 // 对局结果
-var RESULT_UNKNOWN = 0;	// 未知（对弈正在进行中，未分胜负）
-var RESULT_WIN = 1;		// 赢（也就是电脑输了）
+var RESULT_UNKNOWN = 0;	// 未知
+var RESULT_WIN = 1;		// 赢
 var RESULT_DRAW = 2;	// 和棋
-var RESULT_LOSS = 3;	// 输（也就是电脑赢了）
+var RESULT_LOSS = 3;	// 输
 
 var BOARD_WIDTH = 521;
 var BOARD_HEIGHT = 577;
@@ -36,7 +36,6 @@ function alertDelay(message) {
   }, 250);
 }
 
-// Board对象的初始化代码，位于index.html中
 function Board(container, images) {
   this.images = images;			// 图片路径
   this.imgSquares = [];			// img数组，对应棋盘上的90个位置区域
@@ -58,7 +57,7 @@ function Board(container, images) {
   for (var sq = 0; sq < 256; sq ++) {
     // 遍历虚拟棋盘的256个点
 	
-    // 1.判断该点是否位于真实棋盘
+	// 1.判断该点是否位于真实棋盘
 	if (!IN_BOARD(sq)) {
       this.imgSquares.push(null);
       continue;
@@ -172,17 +171,7 @@ Board.prototype.response = function() {
   var mvResult = 0;
   this.busy = true;
   setTimeout(function() {
-    mvResult = board.search.searchMain();
-	if (mvResult != 0) {
-	  this_.addMove(mvResult, true);
-	} else {
-	  /*
-	  此时胜负已分，但是还能苟延残喘一下，造成了没有搜索结果。
-	  等后面使用了迭代加深搜索，会自动解决这一bug（因为会从深度为1开始搜索）。
-	  */
-	  this_.result = this_.computerMove() ? RESULT_WIN : RESULT_LOSS;
-	  this_.postMate(!this_.computerMove());
-	}
+    this_.addMove(board.search.searchMain(LIMIT_DEPTH, 100), true);
     this_.thinking.style.visibility = "hidden";
   }, 250);
 }
@@ -196,7 +185,7 @@ Board.prototype.clickSquare = function(sq_) {
   var pc = this.pos.squares[sq];	// 点击的棋子
   if ((pc & SIDE_TAG(this.pos.sdPlayer)) != 0) {
     // 点击了己方棋子，直接选中该子
-
+	
 	if (this.mvLast != 0) {
       this.drawSquare(SRC(this.mvLast), false);
       this.drawSquare(DST(this.mvLast), false);
