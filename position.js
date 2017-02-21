@@ -873,7 +873,7 @@ Position.prototype.isMate = function() {
   return true;
 }
 
-//　结合搜索深度的输棋分值
+// 结合搜索深度的输棋分值
 Position.prototype.mateValue = function() {
   return this.distance - MATE_VALUE;
 }

@@ -56,9 +56,9 @@ function Board(container, images) {
   var this_ = this;
   for (var sq = 0; sq < 256; sq ++) {
     // 遍历虚拟棋盘的256个点
-	
-	// 1.判断该点是否位于真实棋盘
-	if (!IN_BOARD(sq)) {
+  
+    // 1.判断该点是否位于真实棋盘
+    if (!IN_BOARD(sq)) {
       this.imgSquares.push(null);
       continue;
     }
@@ -102,8 +102,8 @@ function Board(container, images) {
 }
 
 // 设置搜索算法
-Board.prototype.setSearch = function() {
-  this.search = new Search(this.pos);
+Board.prototype.setSearch = function(hashLevel) {
+  this.search = hashLevel == 0 ? null : new Search(this.pos, hashLevel);
 }
 
 // 翻转棋盘位置（电脑执红，也就是电脑先走的时候，会把红棋显示在棋盘上面，黑棋显示在下面）
@@ -137,8 +137,8 @@ Board.prototype.postAddMove = function(mv, computerMove) {
     this.drawSquare(SRC(this.mvLast), false);
     this.drawSquare(DST(this.mvLast), false);
   }
- 
- // 显示这一步走棋的选中方框
+  
+  // 显示这一步走棋的选中方框
   this.drawSquare(SRC(mv), true);
   this.drawSquare(DST(mv), true);
   
@@ -265,7 +265,7 @@ Board.prototype.retract = function() {
   if (this.pos.mvList.length > 1 && this.computerMove()) {
     this.pos.undoMakeMove();
   }
-  
+
   this.flushBoard();
   this.response();
 }

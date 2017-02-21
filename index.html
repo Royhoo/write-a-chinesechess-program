@@ -74,7 +74,7 @@ var STARTUP_FEN = [
 ];
 
 var board = new Board(container, "images/");	// 实例化棋盘对象
-board.setSearch();								// 设置搜索算法
+board.setSearch(16);							// 设置搜索算法
 board.computer = 1;								// 电脑默认执黑
 
 // 重新开始
