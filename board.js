@@ -1,5 +1,11 @@
 "use strict";
 
+// 对局结果
+var RESULT_UNKNOWN = 0;	// 未知（对弈正在进行中，未分胜负）
+var RESULT_WIN = 1;		// 赢（也就是电脑输了）
+var RESULT_DRAW = 2;	// 和棋
+var RESULT_LOSS = 3;	// 输（也就是电脑赢了）
+
 var BOARD_WIDTH = 521;
 var BOARD_HEIGHT = 577;
 var SQUARE_SIZE = 57;
@@ -24,17 +30,24 @@ function SQ_Y(sq) {
   return SQUARE_TOP + (RANK_Y(sq) - 3) * SQUARE_SIZE;
 }
 
+function alertDelay(message) {
+  setTimeout(function() {
+    alert(message);
+  }, 250);
+}
+
 // Board对象的初始化代码，位于index.html中
 function Board(container, images) {
-  this.images = images;	// 图片路径
-  this.imgSquares = [];	// img数组，对应棋盘上的90个位置区域
+  this.images = images;			// 图片路径
+  this.imgSquares = [];			// img数组，对应棋盘上的90个位置区域
   this.pos = new Position();
   this.pos.fromFen("rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1");	// 根据FEN串初始化棋局
-  this.sqSelected = 0;	// 当前选中棋子的位置（如果为0，表示当前没有棋子被选中）
-  this.mvLast = 0;		// 上一步走法
-  this.search = null;	// Search对象的实例
-  this.computer = -1;	// this.computer = 0，表示电脑执黑；this.computer = 1，表示电脑执红
-  this.busy = false;	// false表示空闲状态；true表示繁忙状态。繁忙状态不响应用户点击。
+  this.sqSelected = 0;			// 当前选中棋子的位置（如果为0，表示当前没有棋子被选中）
+  this.mvLast = 0;				// 上一步走法
+  this.search = null;			// Search对象的实例
+  this.computer = -1;			// this.computer = 0，表示电脑执黑；this.computer = 1，表示电脑执红
+  this.result = RESULT_UNKNOWN;	// 对局结果
+  this.busy = false;			// false-空闲状态；true-繁忙状态，不再响应用户点击。
 
   var style = container.style;
   style.position = "relative";
@@ -44,13 +57,13 @@ function Board(container, images) {
   var this_ = this;
   for (var sq = 0; sq < 256; sq ++) {
     // 遍历虚拟棋盘的256个点
-  
+	
     // 1.判断该点是否位于真实棋盘
-    if (!IN_BOARD(sq)) {
+	if (!IN_BOARD(sq)) {
       this.imgSquares.push(null);
       continue;
     }
-	
+
 	// 2.棋盘上的90个区域，每个区域都会定义一个对应的img标签
     var img = document.createElement("img");
     var style = img.style;
@@ -104,7 +117,7 @@ Board.prototype.computerMove = function() {
   return this.pos.sdPlayer == this.computer;
 }
 
-// 判断这步棋是否合法，如果合法，及执行这步棋
+// 判断这步棋是否合法，如果合法，就执行这步棋
 Board.prototype.addMove = function(mv, computerMove) {
   // 判断这步棋是否合法
   if (!this.pos.legalMove(mv)) {
@@ -125,7 +138,7 @@ Board.prototype.postAddMove = function(mv, computerMove) {
     this.drawSquare(SRC(this.mvLast), false);
     this.drawSquare(DST(this.mvLast), false);
   }
-  
+
   // 显示这一步走棋的选中方框
   this.drawSquare(SRC(mv), true);
   this.drawSquare(DST(mv), true);
@@ -133,35 +146,57 @@ Board.prototype.postAddMove = function(mv, computerMove) {
   this.sqSelected = 0;
   this.mvLast = mv;
   
+  // 判断游戏是否结束
+  if (this.pos.isMate()) {	// 无棋可走，实际上就是被将死了
+    this.result = computerMove ? RESULT_LOSS : RESULT_WIN;
+	this.postMate(computerMove);
+  }
+  
   // 电脑回一步棋
   this.response();
 }
 
-// 电脑走一步棋
+Board.prototype.postMate = function(computerMove) {
+  alertDelay(computerMove ? "请再接再厉！" : "祝贺你取得胜利！");
+  this.busy = false;
+}
+
+// 电脑回一步棋
 Board.prototype.response = function() {
-  if (this.search == null || !this.computerMove()) {	// 搜索对象为null或者不该电脑走棋，直接返回
+  if (this.search == null || !this.computerMove()) {	// 搜索对象为null或者不该电脑走棋
     this.busy = false;
     return;
   }
   this.thinking.style.visibility = "visible";			// 显示电脑思考中的图片
   var this_ = this;
+  var mvResult = 0;
   this.busy = true;
   setTimeout(function() {
-    this_.addMove(board.search.searchMain(), true);		// 调用搜索算法获得一步棋，并执行这步棋
-    this_.thinking.style.visibility = "hidden";			// 隐藏电脑思考中的图片
+    mvResult = board.search.searchMain();
+	if (mvResult != 0) {
+	  this_.addMove(mvResult, true);
+	} else {
+	  /*
+	  此时胜负已分，但是还能苟延残喘一下，造成了没有搜索结果。
+	  等后面使用了迭代加深搜索，会自动解决这一bug（因为会从深度为1开始搜索）。
+	  */
+	  this_.result = this_.computerMove() ? RESULT_WIN : RESULT_LOSS;
+	  this_.postMate(!this_.computerMove());
+	}
+    this_.thinking.style.visibility = "hidden";
   }, 250);
 }
 
 // 点击棋盘的响应函数。点击棋盘（棋子或者空位置），就会调用该函数。sq_是点击的位置
 Board.prototype.clickSquare = function(sq_) {
-  if (this.busy) {
+  if (this.busy || this.result != RESULT_UNKNOWN) {
     return;
   }
   var sq = this.flipped(sq_);		// 点击的位置（如果是电脑执红，位置是被翻转的。再执行一遍flipped，位置就被翻转回来了。）
   var pc = this.pos.squares[sq];	// 点击的棋子
   if ((pc & SIDE_TAG(this.pos.sdPlayer)) != 0) {
     // 点击了己方棋子，直接选中该子
-	
+
 	if (this.mvLast != 0) {
       this.drawSquare(SRC(this.mvLast), false);
       this.drawSquare(DST(this.mvLast), false);
@@ -195,13 +230,14 @@ Board.prototype.flushBoard = function() {
 
 // 棋局重新开始
 Board.prototype.restart = function(fen) {
-  if (this.busy) {			// 电脑正在思考中，不响应任何点击事件
+  if (this.busy) {				// 电脑正在思考中，不响应任何点击事件
     return;
   }
 
-  this.pos.fromFen(fen);	// 根据用户选择的局面重新开始
-  this.flushBoard();		// 重新显示棋盘
-  this.response();			// 如果电脑执红先走，需要自动走一步棋。
+  this.result = RESULT_UNKNOWN;	// 重置对局结果为“未知”
+  this.pos.fromFen(fen);		// 根据用户选择的局面重新开始
+  this.flushBoard();			// 重新显示棋盘
+  this.response();				// 如果电脑执红先走，会自动走步棋。
 }
 
 // 悔棋
@@ -210,6 +246,9 @@ Board.prototype.retract = function() {
     return;
   }
 
+  // 重置对局结果为“未知”
+  this.result = RESULT_UNKNOWN;
+  
   // 如果走法数组不为空，那么就撤销一步棋
   if (this.pos.mvList.length > 1) {
     this.pos.undoMakeMove();
@@ -219,7 +258,7 @@ Board.prototype.retract = function() {
   if (this.pos.mvList.length > 1 && this.computerMove()) {
     this.pos.undoMakeMove();
   }
-  
-  this.flushBoard();	// 重新显示棋盘
-  this.response();		// 点击悔棋后，还是有可能该电脑走棋的（比如在电脑执红先走，并且只是电脑走了一步棋的情况下，点击了悔棋按钮）
+
+  this.flushBoard();
+  this.response();
 }
