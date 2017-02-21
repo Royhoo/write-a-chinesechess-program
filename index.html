@@ -4,11 +4,39 @@
     <title>象棋小巫师</title>
     <script type="text/javascript" src="board.js"></script>
 	<script type="text/javascript" src="position.js"></script>
+	<script type="text/javascript" src="search.js"></script>
     <style type="text/css"><!--
+body {
+  background: url(images/background.gif);
+}
+	
 span.td {
   display: inline-block;
 }
 
+div.label {
+  font-size: 14px;
+  padding:2px;
+}
+
+select {
+  font-size: 14px;
+  width: 108px;
+  padding:2px;
+}
+
+option {
+  font-size: 14px;
+}
+
+input.button {
+  font-size: 14px;
+  width: 108px;
+}
+
+label {
+  font-size: 14px;
+}
     --></style>
   </head>
   <body>
@@ -17,12 +45,48 @@ span.td {
     <div style="text-align:center;white-space:nowrap">
       <span class="td" style="margin-right:10px">
         <div id="container"></div>
-      </span>
+      </span><span class="td" style="vertical-align:top;width:120px;"><div style="text-align:left">
+	  <div class="label">谁先走</div>
+      <div><select id="selMoveMode" size="3">
+        <option selected value="0">我先走</option>
+        <option value="1">电脑先走</option>
+        <option value="2">不用电脑</option>
+      </select></div>
+	  <div class="label">先走让子</div>
+      <div><select id="selHandicap" style="padding:0px">
+        <option selected value="0">不让子</option>
+        <option value="1">让左马</option>
+        <option value="2">让双马</option>
+        <option value="3">让九子</option>
+      </select></div>
+	  <div style="padding-top:2px"><input type="button" class="button" value="重新开始" onclick="restart_click()"></div>
+      <div style="padding-top:2px"><input type="button" class="button" value="悔棋" onclick="retract_click()"></div>
     </div>
     <script type="text/javascript"><!--
 "use strict";
 
-var board = new Board(container, "images/");	// 创建棋盘
+// 可供选择的开局局面
+var STARTUP_FEN = [
+  "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w",
+  "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKAB1R w",
+  "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/R1BAKAB1R w",
+  "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/9/1C5C1/9/RN2K2NR w",
+];
+
+var board = new Board(container, "images/");	// 实例化棋盘对象
+board.setSearch();								// 设置搜索算法
+board.computer = 1;								// 电脑默认执黑
+
+// 重新开始
+function restart_click() {
+  board.computer = 1 - selMoveMode.selectedIndex;			// 根据用户选择，决定电脑执黑还是执红
+  board.restart(STARTUP_FEN[selHandicap.selectedIndex]);	// 使用用户选择的开局局面，初始化棋局
+}
+
+// 悔棋
+function retract_click() {
+  board.retract();
+}
     --></script>
   </body>
 </html>

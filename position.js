@@ -132,6 +132,10 @@ var KNIGHT_PIN_ = [
   0,  0,  0,  0,  0,  0,  0,
 ];
 
+var KING_DELTA = [-16, -1, 1, 16];
+var ADVISOR_DELTA = [-17, -15, 15, 17];
+var KNIGHT_DELTA = [[-33, -31], [-18, 14], [-14, 18], [31, 33]];
+
 // 判断某位置是否在棋盘
 function IN_BOARD(sq) {
   return IN_BOARD_[sq] != 0;
@@ -155,6 +159,10 @@ function FILE_X(sq) {
 // 将二维矩阵转换为一维矩阵
 function COORD_XY(x, y) {
   return x + (y << 4);
+}
+
+function SQUARE_FLIP(sq) {
+  return 254 - sq;
 }
 
 function CHR(n) {
@@ -241,6 +249,11 @@ function KNIGHT_PIN(sqSrc, sqDst) {
   return sqSrc + KNIGHT_PIN_[sqDst - sqSrc + 256];
 }
 
+// sp是棋子位置，sd是走棋方（红方0，黑方1）。如果该位置未过河，则返回true；否则返回false。
+function HOME_HALF(sq, sd) {
+  return (sq & 0x80) != (sd << 7);
+}
+
 // sp是棋子位置，sd是走棋方（红方0，黑方1）。如果该位置已过河，则返回true；否则返回false。
 function AWAY_HALF(sq, sd) {
   return (sq & 0x80) == (sd << 7);
@@ -251,12 +264,12 @@ function SAME_HALF(sqSrc, sqDst) {
   return ((sqSrc ^ sqDst) & 0x80) == 0;
 }
 
-// 如果sqSrc和sqDst在同一行则返回true；否则返回false
+// 如果sqSrc和sqDst在同一行则返回true，否则返回false
 function SAME_RANK(sqSrc, sqDst) {
   return ((sqSrc ^ sqDst) & 0xf0) == 0;
 }
 
-// 如果sqSrc和sqDst在同一列则返回true；否则返回false
+// 如果sqSrc和sqDst在同一列则返回true，否则返回false
 function SAME_FILE(sqSrc, sqDst) {
   return ((sqSrc ^ sqDst) & 0x0f) == 0;
 }
@@ -274,13 +287,20 @@ Position.prototype.clearBoard = function() {
   }
 }
 
-// 通过FEN串初始化棋局
+Position.prototype.setIrrev = function() {
+  this.mvList = [0];	// 存放每步走法的数组
+  this.pcList = [0];	// 存放每步被吃的棋子。如果没有棋子被吃，存放的是0
+  this.distance = 0;	// 深度
+}
+
+// 将FEN串转为一维数组，初始化棋局
 Position.prototype.fromFen = function(fen) {
   this.clearBoard();
   var y = RANK_TOP;
   var x = FILE_LEFT;
   var index = 0;
   if (index == fen.length) {
+    this.setIrrev();
     return;
   }
   var c = fen.charAt(index);
@@ -312,15 +332,157 @@ Position.prototype.fromFen = function(fen) {
     }
     index ++;
     if (index == fen.length) {
-      return;
+      this.setIrrev();
+	  return;
     }
     c = fen.charAt(index);
   }
   index ++;
   if (index == fen.length) {
-    return;
+    this.setIrrev();
+	return;
   }
 
+  this.setIrrev();
+}
+
+// 生成棋局的所有走法
+Position.prototype.generateMoves = function() {
+  var mvs = [];									// 用于存储所有合法的走法
+  var pcSelfSide = SIDE_TAG(this.sdPlayer);		// 本方红黑标记(红子是8，黑子是16)
+  var pcOppSide = OPP_SIDE_TAG(this.sdPlayer);	// 对方红黑标记(红子是16，黑子是8)
+  for (var sqSrc = 0; sqSrc < 256; sqSrc ++) {
+    // 遍历虚拟棋盘的256个点
+  
+    var pcSrc = this.squares[sqSrc];		// 某个位置上的棋子
+    if ((pcSrc & pcSelfSide) == 0) {		// 这是对方棋子，或者该位置根本没有棋子
+	  continue;
+    }
+    switch (pcSrc - pcSelfSide) {
+    case PIECE_KING:
+      for (var i = 0; i < 4; i ++) {		// 将的4个方向
+        var sqDst = sqSrc + KING_DELTA[i];	// 得到一个可能的终点位置
+        if (!IN_FORT(sqDst)) {				// 该位置不位于九宫中，不合法
+          continue;
+        }
+        var pcDst = this.squares[sqDst];	// 获得终点位置棋子
+        if ((pcDst & pcSelfSide) == 0) {	// 终点位置的棋子不是本方棋子，或者终点根本没有棋子
+          mvs.push(MOVE(sqSrc, sqDst));		// 步骤合法，保存到数组中
+        }
+      }
+      break;
+    case PIECE_ADVISOR:
+      for (var i = 0; i < 4; i ++) {		// 仕的4个方向
+        var sqDst = sqSrc + ADVISOR_DELTA[i];	// 得到一个可能的终点位置
+        if (!IN_FORT(sqDst)) {				// 该位置不位于九宫中，不合法
+          continue;
+        }
+        var pcDst = this.squares[sqDst];	// 获得终点棋子
+        if ((pcDst & pcSelfSide) == 0) {	// 终点位置的棋子不是本方棋子，或者终点根本没有棋子
+          mvs.push(MOVE(sqSrc, sqDst));		// 步骤合法，保存到数组中
+        }
+      }
+      break;
+    case PIECE_BISHOP:
+      for (var i = 0; i < 4; i ++) {		// 象的4个方向
+        var sqDst = sqSrc + ADVISOR_DELTA[i];	// 获得象眼的位置
+        if (!(IN_BOARD(sqDst) && HOME_HALF(sqDst, this.sdPlayer) &&
+            this.squares[sqDst] == 0)) {	//	象眼不在棋盘上，或者象眼位置已过河，或者象眼存在棋子
+          continue;
+        }
+        sqDst += ADVISOR_DELTA[i];			// 得到一个可能的终点位置
+        var pcDst = this.squares[sqDst];	// 得到终点位置的棋子
+        if ((pcDst & pcSelfSide) == 0) {	// 终点位置没有本方棋子
+          mvs.push(MOVE(sqSrc, sqDst));		// 步骤合法，保存到数组
+        }
+      }
+      break;
+    case PIECE_KNIGHT:
+      for (var i = 0; i < 4; i ++) {		// 马腿的4个方向
+        var sqDst = sqSrc + KING_DELTA[i];	// 得到一个马腿的位置
+        if (this.squares[sqDst] > 0) {		// 马腿位置存在棋子
+          continue;
+        }
+        for (var j = 0; j < 2; j ++) {		// 1个马腿对应2个马的方向
+          sqDst = sqSrc + KNIGHT_DELTA[i][j];	// 得到一个可能的终点位置
+          if (!IN_BOARD(sqDst)) {			// 该位置不在棋盘上
+            continue;
+          }
+          var pcDst = this.squares[sqDst];	// 得到终点位置的棋子
+          if ((pcDst & pcSelfSide) == 0) {	// 终点位置不存在本方棋子
+            mvs.push(MOVE(sqSrc, sqDst));
+          }
+        }
+      }
+      break;
+    case PIECE_ROOK:
+      for (var i = 0; i < 4; i ++) {
+        var delta = KING_DELTA[i];	// 得到一个方向
+        var sqDst = sqSrc + delta;	// 从起点sqSrc开始，沿着方向delta走一步
+        while (IN_BOARD(sqDst)) {	// 得到的终点位于棋盘
+          var pcDst = this.squares[sqDst];
+          if (pcDst == 0) {			// 终点没有棋子，走法合法
+            mvs.push(MOVE(sqSrc, sqDst));
+          } else {
+            if ((pcDst & pcOppSide) != 0) {	// 终点有对方棋子，走法合法
+              mvs.push(MOVE(sqSrc, sqDst));
+            }
+            break;
+          }
+          sqDst += delta;			// 沿着方向delta向前走一步
+        }
+      }
+      break;
+    case PIECE_CANNON:
+      for (var i = 0; i < 4; i ++) {
+        var delta = KING_DELTA[i];	// 得到一个方向
+        var sqDst = sqSrc + delta;	// 从起点sqSrc开始，沿着方向delta走一步
+        while (IN_BOARD(sqDst)) {	// 得到的终点位于棋盘
+          var pcDst = this.squares[sqDst];
+          if (pcDst == 0) {			// 终点没有棋子，走法合法
+            mvs.push(MOVE(sqSrc, sqDst));
+          } else {
+            // 终点存在棋子，炮需要翻山
+			break;
+          }
+          sqDst += delta;			// 沿着方向delta向前走一步
+        }
+        sqDst += delta;				// 沿着方向delta向前走一步
+        while (IN_BOARD(sqDst)) {	// 如果sqDst仍位于棋盘，那么此时炮已经翻山了
+          var pcDst = this.squares[sqDst];
+          if (pcDst > 0) {			// 炮翻山后遇到了一个棋子
+            if ((pcDst & pcOppSide) != 0) {	// 炮翻山后，遇到的是一个对方棋子
+              mvs.push(MOVE(sqSrc, sqDst));
+            }
+            break;					// 炮翻山后，不管遇到的是对方棋子，还是己方棋子，都要结束对当前方向的搜索
+          }
+          sqDst += delta;
+        }
+      }
+      break;
+    case PIECE_PAWN:
+      var sqDst = SQUARE_FORWARD(sqSrc, this.sdPlayer);	// 得到兵前进一步的位置
+      if (IN_BOARD(sqDst)) {							// 该位置在棋盘上
+        var pcDst = this.squares[sqDst];
+        if ((pcDst & pcSelfSide) == 0) {				// 目标位置没有本方棋子
+          mvs.push(MOVE(sqSrc, sqDst));
+        }
+      }
+      if (AWAY_HALF(sqSrc, this.sdPlayer)) {			// 这个兵已过河
+        for (var delta = -1; delta <= 1; delta += 2) {	// delta只能取-1和1两个值，这是兵的左右两个方向
+          sqDst = sqSrc + delta;
+          if (IN_BOARD(sqDst)) {						// 该位置在棋盘上
+            var pcDst = this.squares[sqDst];
+            if ((pcDst & pcSelfSide) == 0) {			// 目标位置没有本方棋子
+              mvs.push(MOVE(sqSrc, sqDst));
+            }
+          }
+        }
+      }
+      break;
+    }
+  }
+  return mvs;
 }
 
 // 判断步骤是否合法。是则返回true，否则返回false
@@ -396,24 +558,55 @@ Position.prototype.legalMove = function(mv) {
   }
 }
 
+// 切换走棋方
+Position.prototype.changeSide = function() {
+  this.sdPlayer = 1 - this.sdPlayer;
+}
+
 // 走一步棋
 Position.prototype.makeMove = function(mv) {
-  this.movePiece(mv);
+  this.movePiece(mv);	// 移动棋子
+  this.changeSide();	// 切换走棋方
+  this.distance ++;		// 棋局深度+1
   return true;
 }
 
-// 根据走法移动棋子，删除终点位置的棋子，并将起点位置的棋子放置在终点的位置。
+// 撤销上一步的走棋
+Position.prototype.undoMakeMove = function() {
+  this.distance --;		// 棋局深度减1
+  this.changeSide();	// 切换走棋方
+  this.undoMovePiece();	// 取消上一步的走棋
+}
+
+// 根据走法移动棋子，删除终点位置的棋子，将起点位置的棋子放置在终点的位置。
 Position.prototype.movePiece = function(mv) {
   var sqSrc = SRC(mv);			// 起点位置
   var sqDst = DST(mv);			// 终点位置
   var pc = this.squares[sqDst];	// 终点位置的棋子
+  this.pcList.push(pc);			// 将终点位置的棋子，存入吃子列表
   if (pc > 0) {
-    // 终点有棋子，要删除该棋子
+    // 终点有棋子，则要删除该棋子
     this.addPiece(sqDst, pc, DEL_PIECE);
   }
-  pc = this.squares[sqSrc];				// 起点位置的棋子
+  pc = this.squares[sqSrc];
   this.addPiece(sqSrc, pc, DEL_PIECE);	// 删除起点棋子
   this.addPiece(sqDst, pc, ADD_PIECE);	// 将原来起点的棋子添加到终点
+  this.mvList.push(mv);					// 将走法存入走法列表
+}
+
+// 取消上一步对棋子的移动
+Position.prototype.undoMovePiece = function() {
+  var mv = this.mvList.pop();
+  var sqSrc = SRC(mv);
+  var sqDst = DST(mv);
+  var pc = this.squares[sqDst];
+  this.addPiece(sqDst, pc, DEL_PIECE);	// 删除终点棋子
+  this.addPiece(sqSrc, pc, ADD_PIECE);	// 将终点位置的棋子添加到起点
+  pc = this.pcList.pop();
+  if (pc > 0) {
+    // 这步棋发生了吃子，需要把吃掉的棋子放回终点位置
+    this.addPiece(sqDst, pc, ADD_PIECE);
+  }
 }
 
 // 如果bDel为false，则将棋子pc添加进棋局中的sp位置；如果bDel为true，则删除sp位置的棋子。
