@@ -62,7 +62,7 @@ function Board(container, images) {
       this.imgSquares.push(null);
       continue;
     }
-
+	
 	// 2.棋盘上的90个区域，每个区域都会定义一个对应的img标签
     var img = document.createElement("img");
     var style = img.style;
@@ -137,8 +137,8 @@ Board.prototype.postAddMove = function(mv, computerMove) {
     this.drawSquare(SRC(this.mvLast), false);
     this.drawSquare(DST(this.mvLast), false);
   }
-
-  // 显示这一步走棋的选中方框
+ 
+ // 显示这一步走棋的选中方框
   this.drawSquare(SRC(mv), true);
   this.drawSquare(DST(mv), true);
   
@@ -149,6 +149,24 @@ Board.prototype.postAddMove = function(mv, computerMove) {
   if (this.pos.isMate()) {	// 无棋可走，实际上就是被将死了
     this.result = computerMove ? RESULT_LOSS : RESULT_WIN;
 	this.postMate(computerMove);
+  }
+  
+  // 判断是否出现长将
+  var vlRep = this.pos.repStatus(3);
+  if (vlRep > 0) {
+    vlRep = this.pos.repValue(vlRep);
+    if (vlRep > -WIN_VALUE && vlRep < WIN_VALUE) {
+      this.result = RESULT_DRAW;
+      alertDelay("双方不变作和，辛苦了！");
+    } else if (computerMove == (vlRep < 0)) {
+      this.result = RESULT_LOSS;
+      alertDelay("长将作负，请不要气馁！");
+    } else {
+      this.result = RESULT_WIN;
+      alertDelay("长将作负，祝贺你取得胜利！");
+    }
+    this.busy = false;
+    return;
   }
   
   // 电脑回一步棋
@@ -247,7 +265,7 @@ Board.prototype.retract = function() {
   if (this.pos.mvList.length > 1 && this.computerMove()) {
     this.pos.undoMakeMove();
   }
-
+  
   this.flushBoard();
   this.response();
 }

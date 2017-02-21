@@ -1,7 +1,11 @@
 "use strict";
 
 var MATE_VALUE = 10000;				// 最高分值
+var BAN_VALUE = MATE_VALUE - 100;	// 长将判负的分值
 var WIN_VALUE = MATE_VALUE - 200;	// 赢棋分值（高于此分值都是赢棋）
+var DRAW_VALUE = 20;				// 和棋时返回的分数(取负值)
+var NULL_SAFE_MARGIN = 400;			// 空步裁剪有效的最小优势
+var NULL_OKAY_MARGIN = 200;			// 可以进行空步裁剪的最小优势
 var ADVANCED_VALUE = 3;				// 先行权分值
 
 // 棋子编号
@@ -140,6 +144,7 @@ var KING_DELTA = [-16, -1, 1, 16];
 var ADVISOR_DELTA = [-17, -15, 15, 17];
 var KNIGHT_DELTA = [[-33, -31], [-18, 14], [-14, 18], [31, 33]];
 var KNIGHT_CHECK_DELTA = [[-33, -18], [-31, -14], [14, 31], [18, 33]];
+var MVV_VALUE = [50, 10, 10, 30, 40, 30, 20, 0];	// MVV/LVA每种子力的价值
 
 // 棋子位置价值数组
 var PIECE_VALUE = [
@@ -348,6 +353,11 @@ function MOVE(sqSrc, sqDst) {
   return sqSrc + (sqDst << 8);
 }
 
+// 求MVV/LVA值
+function MVV_LVA(pc, lva) {
+  return MVV_VALUE[pc & 7] - lva;
+}
+
 // sp是棋子位置，sd是走棋方（红方0，黑方1）。返回兵（卒）向前走一步的位置。
 function SQUARE_FORWARD(sq, sd) {
   return sq - 16 + (sd << 5);
@@ -403,6 +413,61 @@ function SAME_FILE(sqSrc, sqDst) {
   return ((sqSrc ^ sqDst) & 0x0f) == 0;
 }
 
+function RC4(key) {
+  this.x = this.y = 0;
+  this.state = [];
+  for (var i = 0; i < 256; i ++) {
+    this.state.push(i);
+  }
+  var j = 0;
+  for (var i = 0; i < 256; i ++) {
+    j = (j + this.state[i] + key[i % key.length]) & 0xff;
+    this.swap(i, j);
+  }
+}
+
+RC4.prototype.swap = function(i, j) {
+  var t = this.state[i];
+  this.state[i] = this.state[j];
+  this.state[j] = t;
+}
+
+RC4.prototype.nextByte = function() {
+  this.x = (this.x + 1) & 0xff;
+  this.y = (this.y + this.state[this.x]) & 0xff;
+  this.swap(this.x, this.y);
+  var t = (this.state[this.x] + this.state[this.y]) & 0xff;
+  return this.state[t];
+}
+
+// 生成32位随机数
+RC4.prototype.nextLong = function() {
+  var n0 = this.nextByte();
+  var n1 = this.nextByte();
+  var n2 = this.nextByte();
+  var n3 = this.nextByte();
+  return n0 + (n1 << 8) + (n2 << 16) + ((n3 << 24) & 0xffffffff);
+}
+
+var PreGen_zobristKeyPlayer, PreGen_zobristLockPlayer;
+var PreGen_zobristKeyTable = [], PreGen_zobristLockTable = [];
+
+var rc4 = new RC4([0]);
+PreGen_zobristKeyPlayer = rc4.nextLong();
+rc4.nextLong();
+PreGen_zobristLockPlayer = rc4.nextLong();
+for (var i = 0; i < 14; i ++) {
+  var keys = [];
+  var locks = [];
+  for (var j = 0; j < 256; j ++) {
+    keys.push(rc4.nextLong());
+    rc4.nextLong();
+    locks.push(rc4.nextLong());
+  }
+  PreGen_zobristKeyTable.push(keys);
+  PreGen_zobristLockTable.push(locks);
+}
+
 function Position() {
   
 }
@@ -414,13 +479,16 @@ Position.prototype.clearBoard = function() {
   for (var sq = 0; sq < 256; sq ++) {
     this.squares.push(0);
   }
+  this.zobristKey = this.zobristLock = 0;
   this.vlWhite = this.vlBlack = 0;
 }
 
 Position.prototype.setIrrev = function() {
-  this.mvList = [0];	// 存放每步走法的数组
-  this.pcList = [0];	// 存放每步被吃的棋子。如果没有棋子被吃，存放的是0
-  this.distance = 0;	// 搜索的深度
+  this.mvList = [0];				// 存放每步走法的数组
+  this.pcList = [0];				// 存放每步被吃的棋子。如果没有棋子被吃，存放的是0
+  this.keyList = [0];				// 存放zobristKey
+  this.chkList = [this.checked()];	// 是否被将军
+  this.distance = 0;				// 搜索的深度
 }
 
 // 将FEN串转为一维数组，初始化棋局
@@ -476,135 +544,172 @@ Position.prototype.fromFen = function(fen) {
   this.setIrrev();
 }
 
-// 生成棋局的所有走法
-Position.prototype.generateMoves = function() {
-  var mvs = [];									// 用于存储所有合法的走法
-  var pcSelfSide = SIDE_TAG(this.sdPlayer);		// 本方红黑标记(红子是8，黑子是16)
-  var pcOppSide = OPP_SIDE_TAG(this.sdPlayer);	// 对方红黑标记(红子是16，黑子是8)
+// 生成棋局的所有走法，vls不为null时，生成吃子走法
+Position.prototype.generateMoves = function(vls) {
+  var mvs = [];
+  var pcSelfSide = SIDE_TAG(this.sdPlayer);
+  var pcOppSide = OPP_SIDE_TAG(this.sdPlayer);
   for (var sqSrc = 0; sqSrc < 256; sqSrc ++) {
-    // 遍历虚拟棋盘的256个点
-  
-    var pcSrc = this.squares[sqSrc];		// 某个位置上的棋子
-    if ((pcSrc & pcSelfSide) == 0) {		// 这是对方棋子，或者该位置根本没有棋子
-	  continue;
+    var pcSrc = this.squares[sqSrc];
+    if ((pcSrc & pcSelfSide) == 0) {
+      continue;
     }
     switch (pcSrc - pcSelfSide) {
     case PIECE_KING:
-      for (var i = 0; i < 4; i ++) {		// 将的4个方向
-        var sqDst = sqSrc + KING_DELTA[i];	// 得到一个可能的终点位置
-        if (!IN_FORT(sqDst)) {				// 该位置不位于九宫中，不合法
+      for (var i = 0; i < 4; i ++) {
+        var sqDst = sqSrc + KING_DELTA[i];
+        if (!IN_FORT(sqDst)) {
           continue;
         }
-        var pcDst = this.squares[sqDst];	// 获得终点位置棋子
-        if ((pcDst & pcSelfSide) == 0) {	// 终点位置的棋子不是本方棋子，或者终点根本没有棋子
-          mvs.push(MOVE(sqSrc, sqDst));		// 步骤合法，保存到数组中
+        var pcDst = this.squares[sqDst];
+        if (vls == null) {
+          if ((pcDst & pcSelfSide) == 0) {
+            mvs.push(MOVE(sqSrc, sqDst));
+          }
+        } else if ((pcDst & pcOppSide) != 0) {	// 目标位置存在对方棋子（这是要生成吃子走法）
+          mvs.push(MOVE(sqSrc, sqDst));			// 存储吃子走法
+          vls.push(MVV_LVA(pcDst, 5));			// 该吃子走法的分值（MVV/LVA启发）
         }
       }
       break;
     case PIECE_ADVISOR:
-      for (var i = 0; i < 4; i ++) {		// 仕的4个方向
-        var sqDst = sqSrc + ADVISOR_DELTA[i];	// 得到一个可能的终点位置
-        if (!IN_FORT(sqDst)) {				// 该位置不位于九宫中，不合法
+      for (var i = 0; i < 4; i ++) {
+        var sqDst = sqSrc + ADVISOR_DELTA[i];
+        if (!IN_FORT(sqDst)) {
           continue;
         }
-        var pcDst = this.squares[sqDst];	// 获得终点棋子
-        if ((pcDst & pcSelfSide) == 0) {	// 终点位置的棋子不是本方棋子，或者终点根本没有棋子
-          mvs.push(MOVE(sqSrc, sqDst));		// 步骤合法，保存到数组中
+        var pcDst = this.squares[sqDst];
+        if (vls == null) {
+          if ((pcDst & pcSelfSide) == 0) {
+            mvs.push(MOVE(sqSrc, sqDst));
+          }
+        } else if ((pcDst & pcOppSide) != 0) {
+          mvs.push(MOVE(sqSrc, sqDst));
+          vls.push(MVV_LVA(pcDst, 1));
         }
       }
       break;
     case PIECE_BISHOP:
-      for (var i = 0; i < 4; i ++) {		// 象的4个方向
-        var sqDst = sqSrc + ADVISOR_DELTA[i];	// 获得象眼的位置
+      for (var i = 0; i < 4; i ++) {
+        var sqDst = sqSrc + ADVISOR_DELTA[i];
         if (!(IN_BOARD(sqDst) && HOME_HALF(sqDst, this.sdPlayer) &&
-            this.squares[sqDst] == 0)) {	//	象眼不在棋盘上，或者象眼位置已过河，或者象眼存在棋子
+            this.squares[sqDst] == 0)) {
           continue;
         }
-        sqDst += ADVISOR_DELTA[i];			// 得到一个可能的终点位置
-        var pcDst = this.squares[sqDst];	// 得到终点位置的棋子
-        if ((pcDst & pcSelfSide) == 0) {	// 终点位置没有本方棋子
-          mvs.push(MOVE(sqSrc, sqDst));		// 步骤合法，保存到数组
+        sqDst += ADVISOR_DELTA[i];
+        var pcDst = this.squares[sqDst];
+        if (vls == null) {
+          if ((pcDst & pcSelfSide) == 0) {
+            mvs.push(MOVE(sqSrc, sqDst));
+          }
+        } else if ((pcDst & pcOppSide) != 0) {
+          mvs.push(MOVE(sqSrc, sqDst));
+          vls.push(MVV_LVA(pcDst, 1));
         }
       }
       break;
     case PIECE_KNIGHT:
-      for (var i = 0; i < 4; i ++) {		// 马腿的4个方向
-        var sqDst = sqSrc + KING_DELTA[i];	// 得到一个马腿的位置
-        if (this.squares[sqDst] > 0) {		// 马腿位置存在棋子
+      for (var i = 0; i < 4; i ++) {
+        var sqDst = sqSrc + KING_DELTA[i];
+        if (this.squares[sqDst] > 0) {
           continue;
         }
-        for (var j = 0; j < 2; j ++) {		// 1个马腿对应2个马的方向
-          sqDst = sqSrc + KNIGHT_DELTA[i][j];	// 得到一个可能的终点位置
-          if (!IN_BOARD(sqDst)) {			// 该位置不在棋盘上
+        for (var j = 0; j < 2; j ++) {
+          sqDst = sqSrc + KNIGHT_DELTA[i][j];
+          if (!IN_BOARD(sqDst)) {
             continue;
           }
-          var pcDst = this.squares[sqDst];	// 得到终点位置的棋子
-          if ((pcDst & pcSelfSide) == 0) {	// 终点位置不存在本方棋子
+          var pcDst = this.squares[sqDst];
+          if (vls == null) {
+            if ((pcDst & pcSelfSide) == 0) {
+              mvs.push(MOVE(sqSrc, sqDst));
+            }
+          } else if ((pcDst & pcOppSide) != 0) {
             mvs.push(MOVE(sqSrc, sqDst));
+            vls.push(MVV_LVA(pcDst, 1));
           }
         }
       }
       break;
     case PIECE_ROOK:
       for (var i = 0; i < 4; i ++) {
-        var delta = KING_DELTA[i];	// 得到一个方向
-        var sqDst = sqSrc + delta;	// 从起点sqSrc开始，沿着方向delta走一步
-        while (IN_BOARD(sqDst)) {	// 得到的终点位于棋盘
+        var delta = KING_DELTA[i];
+        var sqDst = sqSrc + delta;
+        while (IN_BOARD(sqDst)) {
           var pcDst = this.squares[sqDst];
-          if (pcDst == 0) {			// 终点没有棋子，走法合法
-            mvs.push(MOVE(sqSrc, sqDst));
-          } else {
-            if ((pcDst & pcOppSide) != 0) {	// 终点有对方棋子，走法合法
+          if (pcDst == 0) {
+            if (vls == null) {
               mvs.push(MOVE(sqSrc, sqDst));
+            }
+          } else {
+            if ((pcDst & pcOppSide) != 0) {
+              mvs.push(MOVE(sqSrc, sqDst));
+              if (vls != null) {
+                vls.push(MVV_LVA(pcDst, 4));
+              }
             }
             break;
           }
-          sqDst += delta;			// 沿着方向delta向前走一步
+          sqDst += delta;
         }
       }
       break;
     case PIECE_CANNON:
       for (var i = 0; i < 4; i ++) {
-        var delta = KING_DELTA[i];	// 得到一个方向
-        var sqDst = sqSrc + delta;	// 从起点sqSrc开始，沿着方向delta走一步
-        while (IN_BOARD(sqDst)) {	// 得到的终点位于棋盘
+        var delta = KING_DELTA[i];
+        var sqDst = sqSrc + delta;
+        while (IN_BOARD(sqDst)) {
           var pcDst = this.squares[sqDst];
-          if (pcDst == 0) {			// 终点没有棋子，走法合法
-            mvs.push(MOVE(sqSrc, sqDst));
-          } else {
-            // 终点存在棋子，炮需要翻山
-			break;
-          }
-          sqDst += delta;			// 沿着方向delta向前走一步
-        }
-        sqDst += delta;				// 沿着方向delta向前走一步
-        while (IN_BOARD(sqDst)) {	// 如果sqDst仍位于棋盘，那么此时炮已经翻山了
-          var pcDst = this.squares[sqDst];
-          if (pcDst > 0) {			// 炮翻山后遇到了一个棋子
-            if ((pcDst & pcOppSide) != 0) {	// 炮翻山后，遇到的是一个对方棋子
+          if (pcDst == 0) {
+            if (vls == null) {
               mvs.push(MOVE(sqSrc, sqDst));
             }
-            break;					// 炮翻山后，不管遇到的是对方棋子，还是己方棋子，都要结束对当前方向的搜索
+          } else {
+            break;
+          }
+          sqDst += delta;
+        }
+        sqDst += delta;
+        while (IN_BOARD(sqDst)) {
+          var pcDst = this.squares[sqDst];
+          if (pcDst > 0) {
+            if ((pcDst & pcOppSide) != 0) {
+              mvs.push(MOVE(sqSrc, sqDst));
+              if (vls != null) {
+                vls.push(MVV_LVA(pcDst, 4));
+              }
+            }
+            break;
           }
           sqDst += delta;
         }
       }
       break;
     case PIECE_PAWN:
-      var sqDst = SQUARE_FORWARD(sqSrc, this.sdPlayer);	// 得到兵前进一步的位置
-      if (IN_BOARD(sqDst)) {							// 该位置在棋盘上
+      var sqDst = SQUARE_FORWARD(sqSrc, this.sdPlayer);
+      if (IN_BOARD(sqDst)) {
         var pcDst = this.squares[sqDst];
-        if ((pcDst & pcSelfSide) == 0) {				// 目标位置没有本方棋子
+        if (vls == null) {
+          if ((pcDst & pcSelfSide) == 0) {
+            mvs.push(MOVE(sqSrc, sqDst));
+          }
+        } else if ((pcDst & pcOppSide) != 0) {
           mvs.push(MOVE(sqSrc, sqDst));
+          vls.push(MVV_LVA(pcDst, 2));
         }
       }
-      if (AWAY_HALF(sqSrc, this.sdPlayer)) {			// 这个兵已过河
-        for (var delta = -1; delta <= 1; delta += 2) {	// delta只能取-1和1两个值，这是兵的左右两个方向
+      if (AWAY_HALF(sqSrc, this.sdPlayer)) {
+        for (var delta = -1; delta <= 1; delta += 2) {
           sqDst = sqSrc + delta;
-          if (IN_BOARD(sqDst)) {						// 该位置在棋盘上
+          if (IN_BOARD(sqDst)) {
             var pcDst = this.squares[sqDst];
-            if ((pcDst & pcSelfSide) == 0) {			// 目标位置没有本方棋子
+            if (vls == null) {
+              if ((pcDst & pcSelfSide) == 0) {
+                mvs.push(MOVE(sqSrc, sqDst));
+              }
+            } else if ((pcDst & pcOppSide) != 0) {
               mvs.push(MOVE(sqSrc, sqDst));
+              vls.push(MVV_LVA(pcDst, 2));
             }
           }
         }
@@ -773,31 +878,109 @@ Position.prototype.mateValue = function() {
   return this.distance - MATE_VALUE;
 }
 
+// 结合搜索深度的长将判负分值
+Position.prototype.banValue = function() {
+  return this.distance - BAN_VALUE;
+}
+
+// 和棋分值
+Position.prototype.drawValue = function() {
+  return (this.distance & 1) == 0 ? -DRAW_VALUE : DRAW_VALUE;
+}
+
+// 某步走过的棋是否被将军
+Position.prototype.inCheck = function() {
+  return this.chkList[this.chkList.length - 1];
+}
+
+//　某步走过的棋，是否是吃子走法
+Position.prototype.captured = function() {
+  return this.pcList[this.pcList.length - 1] > 0;
+}
+
+// 出现重复局面时，返回的分值
+Position.prototype.repValue = function(vlRep) {
+  var vlReturn = ((vlRep & 2) == 0 ? 0 : this.banValue()) +
+      ((vlRep & 4) == 0 ? 0 : -this.banValue());
+  return vlReturn == 0 ? this.drawValue() : vlReturn;
+}
+
+// 判断是否出现重复局面
+Position.prototype.repStatus = function(recur_) {
+  var recur = recur_;
+  var selfSide = false;
+  var perpCheck = true;
+  var oppPerpCheck = true;
+  var index = this.mvList.length - 1;
+  while (this.mvList[index] > 0 && this.pcList[index] == 0) {
+	if (selfSide) {
+      perpCheck = perpCheck && this.chkList[index];
+      if (this.keyList[index] == this.zobristKey) {
+        recur --;
+        if (recur == 0) {
+          return 1 + (perpCheck ? 2 : 0) + (oppPerpCheck ? 4 : 0);
+        }
+      }
+    } else {
+      oppPerpCheck = oppPerpCheck && this.chkList[index];
+    }
+    selfSide = !selfSide;
+    index --;
+  }
+  return 0;
+}
+
 // 切换走棋方
 Position.prototype.changeSide = function() {
   this.sdPlayer = 1 - this.sdPlayer;
+  this.zobristKey ^= PreGen_zobristKeyPlayer;
+  this.zobristLock ^= PreGen_zobristLockPlayer;
 }
 
 // 走一步棋
 Position.prototype.makeMove = function(mv) {
-  this.movePiece(mv);	// 移动棋子
+  var zobristKey = this.zobristKey;
+  this.movePiece(mv);					// 移动棋子
   
   // 检查走棋是否被将军。如果是，说明这是在送死，撤销走棋并返回false。
   if (this.checked()) {	
     this.undoMovePiece(mv);
     return false;
   }
-
-  this.changeSide();	// 切换走棋方
-  this.distance ++;		// 搜索深度+1
+  this.keyList.push(zobristKey);		// 存储局面的zobristKey校验码
+  this.changeSide();					// 切换走棋方
+  this.chkList.push(this.checked());	// 存储走完棋后，对方是否处于被将军的状态
+  this.distance ++;						// 搜索深度+1
   return true;
 }
 
 // 取消上一步的走棋
 Position.prototype.undoMakeMove = function() {
   this.distance --;		// 搜索深度减1
+  this.chkList.pop();
   this.changeSide();	// 切换走棋方
+  this.keyList.pop();
   this.undoMovePiece();	// 取消上一步的走棋
+}
+
+// 空步搜索
+Position.prototype.nullMove = function() {
+  this.mvList.push(0);
+  this.pcList.push(0);
+  this.keyList.push(this.zobristKey);
+  this.changeSide();
+  this.chkList.push(false);
+  this.distance ++;
+}
+
+// 撤销上一步的空步搜索
+Position.prototype.undoNullMove = function() {
+  this.distance --;
+  this.chkList.pop();
+  this.changeSide();
+  this.keyList.pop();
+  this.pcList.pop();
+  this.mvList.pop();
 }
 
 // 根据走法移动棋子，删除终点位置的棋子，将起点位置的棋子放置在终点的位置。
@@ -807,7 +990,7 @@ Position.prototype.movePiece = function(mv) {
   var pc = this.squares[sqDst];
   this.pcList.push(pc);
   if (pc > 0) {
-    // 终点有棋子，需要删除该棋子
+    // 如果终点有棋子，则要删除该棋子
     this.addPiece(sqDst, pc, DEL_PIECE);
   }
   pc = this.squares[sqSrc];
@@ -846,7 +1029,12 @@ Position.prototype.addPiece = function(sq, pc, bDel) {
     pcAdjust = pc - 16;
     this.vlBlack += bDel ? -PIECE_VALUE[pcAdjust][SQUARE_FLIP(sq)] :
         PIECE_VALUE[pcAdjust][SQUARE_FLIP(sq)];
+	pcAdjust += 7;
   }
+  
+  // 更新局面的zobristKey校验码和zobristLock校验码
+  this.zobristKey ^= PreGen_zobristKeyTable[pcAdjust][sq];
+  this.zobristLock ^= PreGen_zobristLockTable[pcAdjust][sq];
 }
 
 // 局面评估函数，返回当前走棋方的优势
@@ -854,6 +1042,16 @@ Position.prototype.evaluate = function() {
   var vl = (this.sdPlayer == 0 ? this.vlWhite - this.vlBlack :
       this.vlBlack - this.vlWhite) + ADVANCED_VALUE;
   return vl;
+}
+
+// 当前局面的优势是否足以进行空步搜索
+Position.prototype.nullOkay = function() {
+  return (this.sdPlayer == 0 ? this.vlWhite : this.vlBlack) > NULL_OKAY_MARGIN;
+}
+
+// 空步搜索得到的分值是否有效
+Position.prototype.nullSafe = function() {
+  return (this.sdPlayer == 0 ? this.vlWhite : this.vlBlack) > NULL_SAFE_MARGIN;
 }
 
 // 获取历史表的指标
