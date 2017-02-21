@@ -1,5 +1,22 @@
 "use strict";
 
+// 二分法查找
+function binarySearch(vlss, vl) {
+  var low = 0;
+  var high = vlss.length - 1;
+  while (low <= high) {
+    var mid = (low + high) >> 1;
+    if (vlss[mid][0] < vl) {
+      low = mid + 1;
+    } else if (vlss[mid][0] > vl) {
+      high = mid - 1;
+    } else {
+      return mid;
+    }
+  }
+  return -1;
+}
+
 var MATE_VALUE = 10000;				// 最高分值
 var BAN_VALUE = MATE_VALUE - 100;	// 长将判负的分值
 var WIN_VALUE = MATE_VALUE - 200;	// 赢棋分值（高于此分值都是赢棋）
@@ -299,6 +316,10 @@ function SQUARE_FLIP(sq) {
   return 254 - sq;
 }
 
+function FILE_FLIP(x) {
+  return 14 - x;
+}
+
 function CHR(n) {
   return String.fromCharCode(n);
 }
@@ -353,9 +374,17 @@ function MOVE(sqSrc, sqDst) {
   return sqSrc + (sqDst << 8);
 }
 
+function MIRROR_MOVE(mv) {
+  return MOVE(MIRROR_SQUARE(SRC(mv)), MIRROR_SQUARE(DST(mv)));
+}
+
 // 求MVV/LVA值
 function MVV_LVA(pc, lva) {
   return MVV_VALUE[pc & 7] - lva;
+}
+
+function MIRROR_SQUARE(sq) {
+  return COORD_XY(FILE_FLIP(FILE_X(sq)), RANK_Y(sq));
 }
 
 // sp是棋子位置，sd是走棋方（红方0，黑方1）。返回兵（卒）向前走一步的位置。
@@ -382,7 +411,6 @@ function BISHOP_SPAN(sqSrc, sqDst) {
 function BISHOP_PIN(sqSrc, sqDst) {
   return (sqSrc + sqDst) >> 1;
 }
-
 // 如果马的走法合法，则返回相应马脚的位置。否则返回sqSrc。
 function KNIGHT_PIN(sqSrc, sqDst) {
   return sqSrc + KNIGHT_PIN_[sqDst - sqSrc + 256];
@@ -486,7 +514,7 @@ Position.prototype.clearBoard = function() {
 Position.prototype.setIrrev = function() {
   this.mvList = [0];				// 存放每步走法的数组
   this.pcList = [0];				// 存放每步被吃的棋子。如果没有棋子被吃，存放的是0
-  this.keyList = [0];				// 存放zobristKey
+  this.keyList = [0];				// 存放zobristKey校验码
   this.chkList = [this.checked()];	// 是否被将军
   this.distance = 0;				// 搜索的深度
 }
@@ -590,10 +618,10 @@ Position.prototype.generateMoves = function(vls) {
       }
       break;
     case PIECE_BISHOP:
-      for (var i = 0; i < 4; i ++) {
+      for (var i = 0; i < 4; i ++) {	// 象的4个方向
         var sqDst = sqSrc + ADVISOR_DELTA[i];
         if (!(IN_BOARD(sqDst) && HOME_HALF(sqDst, this.sdPlayer) &&
-            this.squares[sqDst] == 0)) {
+            this.squares[sqDst] == 0)) {	//	象眼有棋子
           continue;
         }
         sqDst += ADVISOR_DELTA[i];
@@ -915,7 +943,7 @@ Position.prototype.repStatus = function(recur_) {
   while (this.mvList[index] > 0 && this.pcList[index] == 0) {
 	if (selfSide) {
       perpCheck = perpCheck && this.chkList[index];
-      if (this.keyList[index] == this.zobristKey) {
+      if (this.keyList[index] == this.zobristKey) {	// 这是出现循环局面了
         recur --;
         if (recur == 0) {
           return 1 + (perpCheck ? 2 : 0) + (oppPerpCheck ? 4 : 0);
@@ -940,7 +968,7 @@ Position.prototype.changeSide = function() {
 // 走一步棋
 Position.prototype.makeMove = function(mv) {
   var zobristKey = this.zobristKey;
-  this.movePiece(mv);					// 移动棋子
+  this.movePiece(mv);
   
   // 检查走棋是否被将军。如果是，说明这是在送死，撤销走棋并返回false。
   if (this.checked()) {	
@@ -1017,6 +1045,7 @@ Position.prototype.undoMovePiece = function() {
 // 如果bDel为false，则将棋子pc添加进棋局中的sp位置；如果bDel为true，则删除sp位置的棋子。
 Position.prototype.addPiece = function(sq, pc, bDel) {
   var pcAdjust;
+  
   // 添加或删除棋子
   this.squares[sq] = bDel ? 0 : pc;
   
@@ -1041,7 +1070,7 @@ Position.prototype.addPiece = function(sq, pc, bDel) {
 Position.prototype.evaluate = function() {
   var vl = (this.sdPlayer == 0 ? this.vlWhite - this.vlBlack :
       this.vlBlack - this.vlWhite) + ADVANCED_VALUE;
-  return vl;
+  return vl == this.drawValue() ? vl - 1 : vl;	// 这里是评估出来的分值，要跟和棋的分值区分开。
 }
 
 // 当前局面的优势是否足以进行空步搜索
@@ -1052,6 +1081,73 @@ Position.prototype.nullOkay = function() {
 // 空步搜索得到的分值是否有效
 Position.prototype.nullSafe = function() {
   return (this.sdPlayer == 0 ? this.vlWhite : this.vlBlack) > NULL_SAFE_MARGIN;
+}
+
+Position.prototype.mirror = function() {
+  var pos = new Position();
+  pos.clearBoard();
+  for (var sq = 0; sq < 256; sq ++) {
+    var pc = this.squares[sq];
+    if (pc > 0) {
+      pos.addPiece(MIRROR_SQUARE(sq), pc);
+    }
+  }
+  if (this.sdPlayer == 1) {
+    pos.changeSide();
+  }
+  return pos;
+}
+
+// 获取开局库中的走法
+Position.prototype.bookMove = function() {
+  if (typeof BOOK_DAT != "object" || BOOK_DAT.length == 0) {
+    return 0;
+  }
+  var mirror = false;
+  var lock = this.zobristLock >>> 1; // Convert into Unsigned
+  var index = binarySearch(BOOK_DAT, lock);
+
+  if (index < 0) {
+    mirror = true;
+    lock = this.mirror().zobristLock >>> 1; // Convert into Unsigned
+    index = binarySearch(BOOK_DAT, lock);
+  }
+  if (index < 0) {
+    return 0;
+  }
+
+  index --;
+  while (index >= 0 && BOOK_DAT[index][0] == lock) {
+    index --;
+  }
+  var mvs = [], vls = [];
+  var value = 0;
+  index ++;
+  while (index < BOOK_DAT.length && BOOK_DAT[index][0] == lock) {
+    var mv = BOOK_DAT[index][1];
+    mv = (mirror ? MIRROR_MOVE(mv) : mv);
+    if (this.legalMove(mv)) {
+      mvs.push(mv);
+      var vl = BOOK_DAT[index][2];
+      vls.push(vl);
+      value += vl;
+    }
+    index ++;
+  }
+  if (value == 0) {
+    return 0;
+  }
+
+  //一个局面会对应多种走法，这里是为了增加走棋的随机性。不过每步棋的比重是不一样的。
+  value = Math.floor(Math.random() * value);
+  for (index = 0; index < mvs.length; index ++) {
+    value -= vls[index];
+    if (value < 0) {
+      break;
+    }
+  }
+
+  return mvs[index];
 }
 
 // 获取历史表的指标

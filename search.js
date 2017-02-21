@@ -1,6 +1,5 @@
 "use strict";
 
-
 // 希尔排序
 var SHELL_STEP = [0, 1, 4, 13, 40, 121, 364, 1093];
 function shellSort(mvs, vls) {
@@ -48,7 +47,7 @@ function MoveSort(mvHash, pos, killerTable, historyTable) {
   if (pos.inCheck()) {
     // 处于被将军的状态，直接生产所有走法，只使用置换表和历史表启发
 	
-    this.phase = PHASE_REST;
+	this.phase = PHASE_REST;
     var mvsAll = pos.generateMoves(null);
     for (var i = 0; i < mvsAll.length; i ++) {
       var mv = mvsAll[i]
@@ -57,14 +56,14 @@ function MoveSort(mvHash, pos, killerTable, historyTable) {
       }
       pos.undoMakeMove();
       this.mvs.push(mv);
-	  // 这行代码是要使用置换表启发，把置换表中的走法排在最前面
-      this.vls.push(mv == mvHash ? 0x7fffffff :
+      // 这行代码是要使用置换表启发，把置换表中的走法排在最前面
+	  this.vls.push(mv == mvHash ? 0x7fffffff :
           historyTable[pos.historyIndex(mv)]);
     }
     shellSort(this.mvs, this.vls);
-    this.singleReply = this.mvs.length == 1;			//　判断是否只有一着回棋
+    this.singleReply = this.mvs.length == 1;			//　是否只有一着回棋
   } else {
-    // 没有处于被将军的状态，才考虑杀手启发   
+    // 没有处于被将军的状态，才考虑杀手启发
 	this.mvHash = mvHash;
     this.mvKiller1 = killerTable[pos.distance][0];
     this.mvKiller2 = killerTable[pos.distance][1];
@@ -82,8 +81,8 @@ MoveSort.prototype.next = function() {
     if (this.mvHash > 0) {
       return this.mvHash;
     }
-    // 技巧：这里没有"break"，表示"switch"的上一个"case"执行完后紧接着做下一个"case"，下同
-  
+	// 技巧：这里没有"break"，表示"switch"的上一个"case"执行完后紧接着做下一个"case"，下同
+
   // 2. 杀手着法启发(第一个杀手着法)，完成后立即进入下一阶段；
   case PHASE_KILLER_1:
     this.phase = PHASE_KILLER_2;
@@ -117,6 +116,7 @@ MoveSort.prototype.next = function() {
       var mv = this.mvs[this.index];
       this.index ++;
       if (mv != this.mvHash && mv != this.mvKiller1 && mv != this.mvKiller2) {
+	  //console.log("index="+this.index);
         return mv;
       }
     }
@@ -161,16 +161,24 @@ Search.prototype.probeHash = function(vlAlpha, vlBeta, depth, mv) {
   
   mv[0] = hash.mv;		// 置换表中的最佳着法
   var mate = false;		// 是否为杀棋
-
-  // 3.如果是杀棋，返回与深度相关的杀棋分数
+  
+  // 3.如果是杀棋，返回与深度相关的杀棋分数。如果是长将或者和棋，返回-MATE_VALUE。
   if (hash.vl > WIN_VALUE) {
+    if (hash.vl <= BAN_VALUE) {
+      return -MATE_VALUE;
+    }
     hash.vl -= this.pos.distance;
     mate = true;
   } else if (hash.vl < -WIN_VALUE) {
+    if (hash.vl >= -BAN_VALUE) {
+      return -MATE_VALUE;
+    }
     hash.vl += this.pos.distance;
     mate = true;
+  } else if (hash.vl == this.pos.drawValue()) {
+    return -MATE_VALUE;
   }
-  
+
   // 4.如果置换表中节点的搜索深度小于当前节点，查询失败
   if (hash.depth < depth && !mate) {
     return -MATE_VALUE;
@@ -207,14 +215,19 @@ Search.prototype.recordHash = function(flag, vl, depth, mv) {
   hash.flag = flag;		// 节点类型
   hash.depth = depth;	// 搜索深度
   
-  // 如果是杀棋，需要将分值转换为与深度无关的分值
+  // 如果是杀棋，需要将分值转换为与深度无关的分值。如果是长将或者和棋，有没有最佳走法，就不记入置换表。
   if (vl > WIN_VALUE) {
+    if (mv == 0 && vl <= BAN_VALUE) {
+      return;
+    }
     hash.vl = vl + this.pos.distance;
   } else if (vl < -WIN_VALUE) {
+    if (mv == 0 && vl >= -BAN_VALUE) {
+      return;
+    }
     hash.vl = vl - this.pos.distance;
   } else if (vl == this.pos.drawValue() && mv == 0) {
-    // 如果是和棋并且没有最佳走法，不再记录置换表
-	return;
+    return;
   } else {
     hash.vl = vl;
   }
@@ -231,40 +244,6 @@ Search.prototype.setBestMove = function(mv, depth) {
     mvsKiller[1] = mvsKiller[0];
     mvsKiller[0] = mv;
   }
-}
-
-// 迭代加深搜索
-Search.prototype.searchMain = function(depth, millis) {
-  this.hashTable = [];		// 置换表
-  for (var i = 0; i <= this.hashMask; i ++) {
-    this.hashTable.push({depth: 0, flag: 0, vl: 0, mv: 0, zobristLock: 0});
-  }
-  this.killerTable = [];	// 杀手走法表
-  for (var i = 0; i < LIMIT_DEPTH; i ++) {
-    this.killerTable.push([0, 0]);
-  }
-  this.historyTable = [];	// 历史表
-  for (var i = 0; i < 4096; i ++) {
-    this.historyTable.push(0);
-  }
-  
-  this.mvResult = 0; 			// 搜索出的走法
-  this.pos.distance = 0;		// 初始化搜索深度
-  var t = new Date().getTime();	// 当前时间距离1970-01-01的毫秒数
-
- // 迭代加深搜索
- for (var i = 1; i <= depth; i ++) {
-   var vl = this.searchFull(-MATE_VALUE, MATE_VALUE, i);
-    this.allMillis = new Date().getTime() - t;	// 已经花费的时间
-    if (this.allMillis > millis) {				// 时间用完了
-      break;
-    }
-    if (vl > WIN_VALUE || vl < -WIN_VALUE) {	// 胜负已分，不用继续搜索
-      break;
-    }
- }
-
-  return this.mvResult;
 }
 
 // 静态(Quiescence)搜索
@@ -349,45 +328,41 @@ Search.prototype.searchFull = function(vlAlpha_, vlBeta, depth, noNull) {
   var vlAlpha = vlAlpha_;	// 初始最优值，不再是负无穷
   
   // 一个Alpha-Beta完全搜索分为以下几个阶段
-  
-  if (this.pos.distance > 0) {
-    // 1. 到达水平线，则调用静态搜索(注意：由于空步裁剪，深度可能小于零)
-	if (depth <= 0) {
-      return this.searchQuiesc(vlAlpha, vlBeta);
-    }
-	
-	// 1-1. 检查重复局面(注意：不要在根节点检查，否则就没有走法了)
-	var vlRep = this.pos.repStatus(1);
-    if (vlRep > 0) {
-      return this.pos.repValue(vlRep);
-    }
-	
-	// 1-2. 尝试置换表裁剪，并得到置换表走法
-	var mvHash = [0];
-    vl = this.probeHash(vlAlpha, vlBeta, depth, mvHash);
-    if (vl > -MATE_VALUE) {
-      return vl;
-    }
-	
-	// 1-3. 到达极限深度就返回局面评价
-	if (this.pos.distance == LIMIT_DEPTH) {
-      return this.pos.evaluate();
-    }
-	
-	// 1-4. 尝试空步裁剪(根节点的Beta值是"MATE_VALUE"，所以不可能发生空步裁剪)
-	if (!noNull && !this.pos.inCheck() && this.pos.nullOkay()) {
-      this.pos.nullMove();
-      vl = -this.searchFull(-vlBeta, 1 - vlBeta, depth - NULL_DEPTH - 1, true);
-      this.pos.undoNullMove();
-      if (vl >= vlBeta && (this.pos.nullSafe() ||
-          this.searchFull(vlAlpha, vlBeta, depth - NULL_DEPTH, true) >= vlBeta)) {
-        return vl;
-      }
-    }
-  } else {
-    var mvHash = [0];
+
+  // 1. 到达水平线，则调用静态搜索(注意：由于空步裁剪，深度可能小于零)
+  if (depth <= 0) {
+    return this.searchQuiesc(vlAlpha, vlBeta);
   }
   
+  // 1-1. 检查重复局面(注意：不要在根节点检查，否则就没有走法了)
+  var vlRep = this.pos.repStatus(1);
+  if (vlRep > 0) {
+    return this.pos.repValue(vlRep);
+  }
+  
+  // 1-2. 尝试置换表裁剪，并得到置换表走法
+  var mvHash = [0];
+  vl = this.probeHash(vlAlpha, vlBeta, depth, mvHash);	// 处理hash表查出来的结果（alpha、beta、pv节点的不同处理）
+  if (vl > -MATE_VALUE) {
+    return vl;
+  }
+  
+  // 1-3. 到达极限深度就返回局面评价
+  if (this.pos.distance == LIMIT_DEPTH) {
+    return this.pos.evaluate();
+  }
+  
+  // 1-4. 尝试空步裁剪(根节点的Beta值是"MATE_VALUE"，所以不可能发生空步裁剪)
+  if (!noNull && !this.pos.inCheck() && this.pos.nullOkay()) {
+    this.pos.nullMove();
+    vl = -this.searchFull(-vlBeta, 1 - vlBeta, depth - NULL_DEPTH - 1, true);
+    this.pos.undoNullMove();
+    if (vl >= vlBeta && (this.pos.nullSafe() ||
+        this.searchFull(vlAlpha, vlBeta, depth - NULL_DEPTH, true) >= vlBeta)) {
+      return vl;
+    }
+  }
+
   // 2. 初始化最佳值和最佳走法
   var hashFlag = HASH_ALPHA;	// 节点类型
   var vlBest = -MATE_VALUE;		// 这样可以知道，是否一个走法都没走过(杀棋)
@@ -404,8 +379,16 @@ Search.prototype.searchFull = function(vlAlpha_, vlBeta, depth, noNull) {
 	  continue;
     }
 	// 将军延伸（如果局面处于被将军的状态，或者只有一种回棋，多向下搜索一层）
-	var newDepth = this.pos.inCheck() || sort.singleReply ? depth : depth - 1;
-	vl = -this.searchFull(-vlBeta, -vlAlpha, newDepth, false);
+	var newDepth = this.pos.inCheck() || sort.singleReply ? depth : depth - 1;	// 将军延伸或者只有一种走法也要延伸
+	// PVS主要变例搜索
+	if (vlBest == -MATE_VALUE) {
+      vl = -this.searchFull(-vlBeta, -vlAlpha, newDepth, false);
+    } else {
+      vl = -this.searchFull(-vlAlpha - 1, -vlAlpha, newDepth, false);
+      if (vl > vlAlpha && vl < vlBeta) {
+        vl = -this.searchFull(-vlBeta, -vlAlpha, newDepth, false);
+      }
+    }
 	this.pos.undoMakeMove();
 	
 	// 5. 进行Alpha-Beta大小判断和截断
@@ -420,9 +403,6 @@ Search.prototype.searchFull = function(vlAlpha_, vlBeta, depth, noNull) {
         vlAlpha = vl;			// 缩小Alpha-Beta边界
         hashFlag = HASH_PV;		// 节点类型
 		mvBest = mv;			// PV走法要保存到历史表
-		if (this.pos.distance == 0) {	// 回到了根节点，记录根节点的最佳走法
-	      this.mvResult = mv;
-	    }
       }
     }	
   }
@@ -440,4 +420,117 @@ Search.prototype.searchFull = function(vlAlpha_, vlBeta, depth, noNull) {
   }
 
   return vlBest;
+}
+
+// 对根节点的搜索
+Search.prototype.searchRoot = function(depth) {
+  var vlBest = -MATE_VALUE;
+  var sort = new MoveSort(this.mvResult, this.pos, this.killerTable, this.historyTable);
+  var mv;
+  while ((mv = sort.next()) > 0) {
+    if (!this.pos.makeMove(mv)) {
+      continue;
+    }
+
+    var newDepth = this.pos.inCheck() ? depth : depth - 1;	// 如果老将被攻击，就多搜索一层
+    var vl;
+	// 主要变例搜索
+    if (vlBest == -MATE_VALUE) {
+      vl = -this.searchFull(-MATE_VALUE, MATE_VALUE, newDepth, true);
+    } else {
+      vl = -this.searchFull(-vlBest - 1, -vlBest, newDepth, false);
+      if (vl > vlBest) {
+        vl = -this.searchFull(-MATE_VALUE, -vlBest, newDepth, true);
+      }
+    }
+    this.pos.undoMakeMove();
+    if (vl > vlBest) {
+      vlBest = vl;
+      this.mvResult = mv;
+      if (vlBest > -WIN_VALUE && vlBest < WIN_VALUE) {
+		// 增加电脑走棋的随机性
+        vlBest += Math.floor(Math.random() * RANDOMNESS) -
+            Math.floor(Math.random() * RANDOMNESS);
+        vlBest = (vlBest == this.pos.drawValue() ? vlBest - 1 : vlBest);
+      }
+    }
+  }
+  this.setBestMove(this.mvResult, depth);
+  return vlBest;
+}
+
+// 判断是不是死棋（也就是快输了）
+Search.prototype.searchUnique = function(vlBeta, depth) {
+  var sort = new MoveSort(this.mvResult, this.pos, this.killerTable, this.historyTable);
+  sort.next();
+  var mv;
+  while ((mv = sort.next()) > 0) {
+    if (!this.pos.makeMove(mv)) {
+      continue;
+    }
+    var vl = -this.searchFull(-vlBeta, 1 - vlBeta,
+        this.pos.inCheck() ? depth : depth - 1, false);
+    this.pos.undoMakeMove();
+    if (vl >= vlBeta) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// 迭代加深搜索
+Search.prototype.searchMain = function(depth, millis) {
+  // 搜索开局库
+  this.mvResult = this.pos.bookMove();
+  if (this.mvResult > 0) {
+    this.pos.makeMove(this.mvResult);
+    // 判断开局库中搜到的走法，是否会造成长将以及和棋
+	if (this.pos.repStatus(3) == 0) {
+      this.pos.undoMakeMove();
+      return this.mvResult;
+    }
+    this.pos.undoMakeMove();
+  }
+  
+  this.hashTable = [];		// 置换表
+  for (var i = 0; i <= this.hashMask; i ++) {
+    this.hashTable.push({depth: 0, flag: 0, vl: 0, mv: 0, zobristLock: 0});
+  }
+  
+  this.killerTable = [];	// 杀手走法表
+  for (var i = 0; i < LIMIT_DEPTH; i ++) {
+    this.killerTable.push([0, 0]);
+  }
+  
+  this.historyTable = [];	// 历史表
+  for (var i = 0; i < 4096; i ++) {
+    this.historyTable.push(0);
+  }
+  
+  this.mvResult = 0; 			// 搜索出的走法
+  this.pos.distance = 0;		// 初始化搜索深度
+  var t = new Date().getTime();	// 当前时间距离1970-01-01的毫秒数
+
+ // 迭代加深搜索
+ for (var i = 1; i <= depth; i ++) {
+   var vl = this.searchRoot(i);
+    this.allMillis = new Date().getTime() - t;	// 已经花费的时间
+    if (this.allMillis > millis) {				// 时间用完了
+      break;
+    }
+    if (vl > WIN_VALUE || vl < -WIN_VALUE) {	// 胜负已分，不用继续搜索
+      break;
+    }
+	
+	/*
+	下面三行代码意图很明显，就是判断一下，如果是死棋的话，就不用继续搜索了。
+	不好理解的是，这里为什么要判断是否为死棋。
+	我想，可能是因为在根节点搜索中，为增加走棋的随机性，对vlBest做了小范围的浮动（也就是对vlBest加一或者减一），有可能把死棋，刚好浮动为不是死棋。
+	*/
+    if (this.searchUnique(1 - WIN_VALUE, i)) {
+      break;
+    }
+ }
+
+  return this.mvResult;
 }

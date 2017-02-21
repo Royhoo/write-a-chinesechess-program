@@ -56,9 +56,9 @@ function Board(container, images) {
   var this_ = this;
   for (var sq = 0; sq < 256; sq ++) {
     // 遍历虚拟棋盘的256个点
-  
-    // 1.判断该点是否位于真实棋盘
-    if (!IN_BOARD(sq)) {
+	
+	// 1.判断该点是否位于真实棋盘
+	if (!IN_BOARD(sq)) {
       this.imgSquares.push(null);
       continue;
     }
@@ -137,7 +137,7 @@ Board.prototype.postAddMove = function(mv, computerMove) {
     this.drawSquare(SRC(this.mvLast), false);
     this.drawSquare(DST(this.mvLast), false);
   }
-  
+
   // 显示这一步走棋的选中方框
   this.drawSquare(SRC(mv), true);
   this.drawSquare(DST(mv), true);
@@ -189,7 +189,7 @@ Board.prototype.response = function() {
   var mvResult = 0;
   this.busy = true;
   setTimeout(function() {
-    this_.addMove(board.search.searchMain(LIMIT_DEPTH, 100), true);
+    this_.addMove(board.search.searchMain(LIMIT_DEPTH, 1000), true);
     this_.thinking.style.visibility = "hidden";
   }, 250);
 }
@@ -215,7 +215,7 @@ Board.prototype.clickSquare = function(sq_) {
     this.sqSelected = sq;
   } else if (this.sqSelected > 0) {
     // 点击的不是己方棋子（对方棋子或者无子的位置），但有子选中了(一定是自己的子)，那么执行这个走法
-    this.addMove(MOVE(this.sqSelected, sq), false);
+	this.addMove(MOVE(this.sqSelected, sq), false);
   }
 }
 
