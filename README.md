@@ -1,37 +1,24 @@
-## Welcome to GitHub Pages
+# JavaScript中国象棋程序教程
+“JavaScript中国象棋程序” 这一系列教程将带你从头使用JavaScript编写一个中国象棋程序。希望通过这个系列，我们对博弈程序的算法有一定的了解。同时，我们也将构建出一个不错的中国象棋程序。
 
-You can use the [editor on GitHub](https://github.com/Royhoo/write-a-chinesechess-program/edit/master/README.md) to maintain and preview the content for your website in Markdown files.
+程序的最终效果点[击这里查看](http://www.royhoo.cn/chess/web/index.php?r=site/chess)。
 
-Whenever you commit to this repository, GitHub Pages will run [Jekyll](https://jekyllrb.com/) to rebuild the pages in your site, from the content in your Markdown files.
+JavaScript中国象棋程序系列共有9个部分：
 
-### Markdown
+0、[JavaScript中国象棋程序（0）- 前言](http://www.cnblogs.com/royhoo/p/6426394.html)
 
-Markdown is a lightweight and easy-to-use syntax for styling your writing. It includes conventions for
+1、[JavaScript中国象棋程序（1）- 界面设计](http://www.cnblogs.com/royhoo/p/6424395.html)
 
-```markdown
-Syntax highlighted code block
+2、[JavaScript中国象棋程序（2）- 校验棋子走法](http://www.cnblogs.com/royhoo/p/6424840.html) 
 
-# Header 1
-## Header 2
-### Header 3
+3、[JavaScript中国象棋程序（3）- 电脑自动走棋](http://www.cnblogs.com/royhoo/p/6425387.html)
 
-- Bulleted
-- List
+4、[JavaScript中国象棋程序（4）- 极大极小搜索算法](http://www.cnblogs.com/royhoo/p/6425658.html)
 
-1. Numbered
-2. List
+5、[JavaScript中国象棋程序（5）- Alpha-Beta搜索](http://www.cnblogs.com/royhoo/p/6425761.html)
 
-**Bold** and _Italic_ and `Code` text
+6、[JavaScript中国象棋程序（6）- 克服水平线效应、检查重复局面](http://www.cnblogs.com/royhoo/p/6425817.html)
 
-[Link](url) and ![Image](src)
-```
+7、[JavaScript中国象棋程序（7）- 置换表](http://www.cnblogs.com/royhoo/p/6425858.html)
 
-For more details see [GitHub Flavored Markdown](https://guides.github.com/features/mastering-markdown/).
-
-### Jekyll Themes
-
-Your Pages site will use the layout and styles from the Jekyll theme you have selected in your [repository settings](https://github.com/Royhoo/write-a-chinesechess-program/settings). The name of this theme is saved in the Jekyll `_config.yml` configuration file.
-
-### Support or Contact
-
-Having trouble with Pages? Check out our [documentation](https://help.github.com/categories/github-pages-basics/) or [contact support](https://github.com/contact) and we’ll help you sort it out.
+8、[JavaScript中国象棋程序（8）- 进一步优化](http://www.cnblogs.com/royhoo/p/6425912.html)
