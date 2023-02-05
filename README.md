@@ -1,7 +1,7 @@
 # JavaScript中国象棋程序教程
 “JavaScript中国象棋程序” 这一系列教程将带你从头使用JavaScript编写一个中国象棋程序。希望通过这个系列，我们对博弈程序的算法有一定的了解。同时，我们也将构建出一个不错的中国象棋程序。
 
-程序的最终效果点[击这里查看](http://www.royhoo.cn/chess/web/index.php?r=site/chess)。
+程序的最终效果点[击这里查看](https://write-a-chinesechess-program.royhooroyhoo.repl.co/)。
 
 JavaScript中国象棋程序系列共有9个部分：
 
