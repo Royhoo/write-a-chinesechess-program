@@ -1,94 +1,322 @@
-<html>
-  <head>
-    <meta charset="utf-8">
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <title>象棋小巫师</title>
-    <script type="text/javascript" src="board.js"></script>
-    <script type="text/javascript" src="position.js"></script>
-    <script type="text/javascript" src="search.js"></script>
-    <script type="text/javascript" src="book.js"></script>
-    <style type="text/css"><!--
-body {
-  background: url(images/background.gif);
-}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>象棋小巫师</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;700&display=swap" rel="stylesheet">
+  <script src="board.js"></script>
+  <script src="position.js"></script>
+  <script src="search.js"></script>
+  <script src="book.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-span.td {
-  display: inline-block;
-}
+    body {
+      min-height: 100vh;
+      background: linear-gradient(135deg, #1a0a00 0%, #3d1a00 40%, #1a0a00 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding: 28px 16px 40px;
+      font-family: 'Noto Serif SC', '宋体', serif;
+      color: #f0e0c0;
+    }
 
-div.label {
-  font-size: 14px;
-  padding:2px;
-}
+    /* ── 标题 ─────────────────────────────────── */
+    .title-wrap {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+    .title-wrap h1 {
+      font-size: 36px;
+      font-weight: 700;
+      letter-spacing: 6px;
+      color: #f5c842;
+      text-shadow: 0 0 18px rgba(245,200,66,0.6), 0 2px 4px rgba(0,0,0,0.8);
+    }
+    .title-wrap p {
+      margin-top: 6px;
+      font-size: 13px;
+      color: rgba(240,224,192,0.55);
+      letter-spacing: 2px;
+    }
 
-select {
-  font-size: 14px;
-  width: 108px;
-  padding:2px;
-}
+    /* ── 主体布局 ─────────────────────────────── */
+    .game-wrap {
+      display: flex;
+      gap: 24px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
 
-option {
-  font-size: 14px;
-}
+    /* ── 棋盘容器 ─────────────────────────────── */
+    #container {
+      position: relative;
+      flex-shrink: 0;
+    }
 
-input.button {
-  font-size: 14px;
-  width: 108px;
-}
+    /* 思考覆盖层 */
+    #thinkingOverlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      border-radius: 12px;
+      background: rgba(0,0,0,0.38);
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+      pointer-events: none;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .thinking-spinner {
+      width: 48px; height: 48px;
+      border: 5px solid rgba(245,200,66,0.3);
+      border-top-color: #f5c842;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    .thinking-text {
+      color: #f5c842;
+      font-size: 16px;
+      letter-spacing: 3px;
+      text-shadow: 0 0 8px rgba(245,200,66,0.8);
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
 
-label {
-  font-size: 14px;
-}
-    --></style>
-  </head>
-  <body>
-    <div style="text-align:center;font-size:28px;font-family:黑体">象棋小巫师</div>
-    <div style="height:16px"></div>
-    <div style="text-align:center;white-space:nowrap">
-      <span class="td" style="margin-right:10px">
-        <div id="container"></div>
-      </span><span class="td" style="vertical-align:top;width:120px;"><div style="text-align:left">
-      <div class="label">谁先走</div>
-      <div><select id="selMoveMode" size="3">
-        <option selected value="0">我先走</option>
-        <option value="1">电脑先走</option>
-        <option value="2">不用电脑</option>
-      </select></div>
-      <div class="label">先走让子</div>
-      <div><select id="selHandicap" style="padding:0px">
-        <option selected value="0">不让子</option>
-        <option value="1">让左马</option>
-        <option value="2">让双马</option>
-        <option value="3">让九子</option>
-      </select></div>
-      <div style="padding-top:2px"><input type="button" class="button" value="重新开始" onclick="restart_click()"></div>
-      <div style="padding-top:2px"><input type="button" class="button" value="悔棋" onclick="retract_click()"></div>
+    /* ── 侧边面板 ─────────────────────────────── */
+    .panel {
+      background: linear-gradient(160deg, rgba(80,30,0,0.85) 0%, rgba(40,10,0,0.92) 100%);
+      border: 1px solid rgba(245,200,66,0.25);
+      border-radius: 14px;
+      padding: 20px 18px;
+      width: 168px;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+      backdrop-filter: blur(6px);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .panel-section {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .panel-label {
+      font-size: 12px;
+      letter-spacing: 3px;
+      color: rgba(245,200,66,0.7);
+      text-transform: uppercase;
+    }
+
+    /* ── 单选按钮组 ────────────────────────────── */
+    .radio-group {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .radio-group label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      color: #e8d5b0;
+      padding: 5px 8px;
+      border-radius: 7px;
+      transition: background 0.15s;
+    }
+    .radio-group label:hover { background: rgba(245,200,66,0.12); }
+    .radio-group input[type=radio] { display: none; }
+    .radio-dot {
+      width: 14px; height: 14px;
+      border: 2px solid rgba(245,200,66,0.5);
+      border-radius: 50%;
+      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      transition: border-color 0.15s;
+    }
+    .radio-group input[type=radio]:checked + .radio-dot {
+      border-color: #f5c842;
+      background: #f5c842;
+      box-shadow: 0 0 6px rgba(245,200,66,0.8);
+    }
+    .radio-group input[type=radio]:checked + .radio-dot::after {
+      content: '';
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: #3d1a00;
+    }
+
+    /* ── 下拉框 ────────────────────────────────── */
+    select {
+      width: 100%;
+      background: rgba(245,200,66,0.08);
+      border: 1px solid rgba(245,200,66,0.3);
+      border-radius: 8px;
+      color: #e8d5b0;
+      font-family: inherit;
+      font-size: 14px;
+      padding: 7px 10px;
+      outline: none;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      appearance: none;
+      -webkit-appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23f5c842' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      padding-right: 28px;
+    }
+    select:hover, select:focus {
+      border-color: rgba(245,200,66,0.7);
+      background-color: rgba(245,200,66,0.14);
+    }
+    option { background: #3d1a00; color: #e8d5b0; }
+
+    /* ── 按钮 ──────────────────────────────────── */
+    .btn {
+      width: 100%;
+      padding: 10px;
+      border: none;
+      border-radius: 9px;
+      font-family: inherit;
+      font-size: 15px;
+      letter-spacing: 3px;
+      cursor: pointer;
+      transition: transform 0.1s, box-shadow 0.15s, filter 0.15s;
+    }
+    .btn:active { transform: scale(0.97); }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #f5c842 0%, #e0a020 100%);
+      color: #3d1a00;
+      font-weight: 700;
+      box-shadow: 0 3px 12px rgba(245,200,66,0.4);
+    }
+    .btn-primary:hover { filter: brightness(1.1); box-shadow: 0 4px 18px rgba(245,200,66,0.6); }
+
+    .btn-secondary {
+      background: rgba(245,200,66,0.1);
+      color: #f0d090;
+      border: 1px solid rgba(245,200,66,0.3);
+    }
+    .btn-secondary:hover { background: rgba(245,200,66,0.2); border-color: rgba(245,200,66,0.6); }
+
+    /* ── 分隔线 ────────────────────────────────── */
+    .divider {
+      height: 1px;
+      background: rgba(245,200,66,0.18);
+      margin: 2px 0;
+    }
+
+    /* ── 状态提示 ──────────────────────────────── */
+    .status-bar {
+      margin-top: 16px;
+      text-align: center;
+      font-size: 13px;
+      letter-spacing: 2px;
+      color: rgba(240,224,192,0.5);
+      min-height: 20px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="title-wrap">
+    <h1>象 棋 小 巫 师</h1>
+    <p>Chinese Chess · AI Engine v1.0</p>
+  </div>
+
+  <div class="game-wrap">
+    <!-- 棋盘 -->
+    <div id="container"></div>
+
+    <!-- 控制面板 -->
+    <div class="panel">
+
+      <div class="panel-section">
+        <div class="panel-label">谁先走</div>
+        <div class="radio-group" id="moveMode">
+          <label>
+            <input type="radio" name="moveMode" value="0" checked>
+            <span class="radio-dot"></span>我先走
+          </label>
+          <label>
+            <input type="radio" name="moveMode" value="1">
+            <span class="radio-dot"></span>电脑先走
+          </label>
+          <label>
+            <input type="radio" name="moveMode" value="2">
+            <span class="radio-dot"></span>双人对战
+          </label>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="panel-section">
+        <div class="panel-label">让子设置</div>
+        <select id="selHandicap">
+          <option value="0">平局开始</option>
+          <option value="1">让左马</option>
+          <option value="2">让双马</option>
+          <option value="3">让九子</option>
+        </select>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="panel-section">
+        <button class="btn btn-primary" onclick="restart_click()">重新开始</button>
+        <button class="btn btn-secondary" onclick="retract_click()">悔　　棋</button>
+      </div>
+
     </div>
-    <script type="text/javascript"><!--
-"use strict";
+  </div>
 
-// 可供选择的开局局面
-var STARTUP_FEN = [
-  "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w",
-  "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKAB1R w",
-  "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/R1BAKAB1R w",
-  "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/9/1C5C1/9/RN2K2NR w",
-];
+  <div class="status-bar" id="statusBar">祝您棋艺精进！</div>
 
-var board = new Board(container, "images/");  // 实例化棋盘对象
-board.setSearch(16);                          // 设置搜索算法
-board.computer = 1;                           // 电脑默认执黑
+  <script>
+  "use strict";
 
-// 重新开始
-function restart_click() {
-  board.computer = 1 - selMoveMode.selectedIndex;          // 根据用户选择，决定电脑执黑还是执红
-  board.restart(STARTUP_FEN[selHandicap.selectedIndex]);   // 使用用户选择的开局局面，初始化棋局
-}
+  var STARTUP_FEN = [
+    "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w",
+    "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKAB1R w",
+    "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/R1BAKAB1R w",
+    "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/9/1C5C1/9/RN2K2NR w",
+  ];
 
-// 悔棋
-function retract_click() {
-  board.retract();
-}
-    --></script>
-  </body>
+  var board = new Board(document.getElementById("container"), "images/");
+  board.setSearch(16);
+  board.computer = 1;
+
+  function getMoveMode() {
+    var radios = document.querySelectorAll('input[name="moveMode"]');
+    for (var i = 0; i < radios.length; i++) {
+      if (radios[i].checked) return parseInt(radios[i].value);
+    }
+    return 0;
+  }
+
+  function restart_click() {
+    var mode = getMoveMode();
+    board.computer = (mode == 2) ? -1 : (1 - mode);
+    board.restart(STARTUP_FEN[parseInt(selHandicap.value)]);
+    document.getElementById("statusBar").textContent = "对局开始，祝您棋艺精进！";
+  }
+
+  function retract_click() {
+    board.retract();
+    document.getElementById("statusBar").textContent = "已悔棋，请重新落子";
+  }
+  </script>
+
+</body>
 </html>
